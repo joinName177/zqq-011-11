@@ -119,12 +119,34 @@ export function createRecordFromTag(tag: string, intensity: number, note: string
   };
 }
 
-export function evaluateSynopticSystem(records: MoodRecord[]): SynopticChartData {
-  const sorted = [...records].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-  const currentRecord = sorted[sorted.length - 1] || createRecordFromTag('阴转多云', 5, '默认天气');
+function compareRecords(a: MoodRecord, b: MoodRecord): number {
+  const byDate = a.date.localeCompare(b.date);
+  if (byDate !== 0) return byDate;
+  return a.id.localeCompare(b.id);
+}
+
+export function sortMoodRecords(records: readonly MoodRecord[]): MoodRecord[] {
+  return [...records].sort(compareRecords);
+}
+
+interface EvaluateOptions {
+  selectedRecordId?: string;
+}
+
+export function evaluateSynopticSystem(
+  records: readonly MoodRecord[],
+  options: EvaluateOptions = {}
+): SynopticChartData {
+  const allSorted = sortMoodRecords(records);
+  const selectedIndex = options.selectedRecordId
+    ? allSorted.findIndex(record => record.id === options.selectedRecordId)
+    : -1;
+  const sorted = selectedIndex >= 0 ? allSorted.slice(0, selectedIndex + 1) : allSorted;
+  const fallbackRecord = createRecordFromTag('阴转多云', 5, '默认天气');
+  const currentRecord = sorted[sorted.length - 1] || fallbackRecord;
 
   const totalPressure = sorted.reduce((acc, r) => acc + r.pressureHpa, 0);
-  const avgPressure = Math.round(totalPressure / sorted.length);
+  const avgPressure = sorted.length > 0 ? Math.round(totalPressure / sorted.length) : fallbackRecord.pressureHpa;
 
   // Barometric zones analysis
   let equatorial = 0; // high intensity + low/moderate pressure
@@ -277,7 +299,7 @@ export function evaluateSynopticSystem(records: MoodRecord[]): SynopticChartData
     chartId: `SYN-${Date.now().toString(36).toUpperCase()}`,
     generatedDate: new Date().toLocaleDateString('zh-CN'),
     currentRecord,
-    records: sorted,
+    records: allSorted,
     averagePressure: avgPressure,
     zones,
     monsoon,

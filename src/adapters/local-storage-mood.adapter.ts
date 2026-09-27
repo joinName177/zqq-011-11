@@ -23,10 +23,8 @@ export class LocalStorageMoodAdapter implements MoodRepositoryPort {
 
   add(record: MoodRecord): void {
     const records = this.getAll();
-    // remove existing for same date if any
-    const filtered = records.filter(r => r.date !== record.date);
-    filtered.push(record);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(filtered));
+    records.push(record);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
   }
 
   delete(id: string): void {

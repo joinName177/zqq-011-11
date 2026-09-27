@@ -4,8 +4,12 @@ import { TAG_METAS } from '../core/meteorology-engine';
 export interface WeatherUIHandlers {
   onOpenLogModal: () => void;
   onResetData: () => void;
-  onSubmitLog: (tag: string, intensity: number, note: string) => void;
+  onSubmitLog: () => void;
   onSelectRecord: (record: MoodRecord) => void;
+  onCloseModal: () => void;
+  onTagChange: (tag: string) => void;
+  onIntensityChange: (value: number) => void;
+  onNoteChange: (value: string) => void;
 }
 
 export function renderWeatherApp(
@@ -14,12 +18,7 @@ export function renderWeatherApp(
   isModalOpen: boolean,
   selectedTag: string,
   selectedIntensity: number,
-  noteText: string,
-  handlers: WeatherUIHandlers,
-  onCloseModal: () => void,
-  onTagChange: (tag: string) => void,
-  onIntensityChange: (val: number) => void,
-  onNoteChange: (val: string) => void
+  noteText: string
 ) {
   const cur = chartData.currentRecord;
   const meta = TAG_METAS[cur.tag] || TAG_METAS['阴转多云'];
@@ -326,50 +325,81 @@ export function renderWeatherApp(
       }
     </div>
   `;
+}
 
-  // Attach event listeners
-  container.querySelector('#btnOpenLog')?.addEventListener('click', handlers.onOpenLogModal);
-  container.querySelector('#btnReset')?.addEventListener('click', handlers.onResetData);
+export function bindWeatherApp(
+  container: HTMLElement,
+  handlers: WeatherUIHandlers,
+  getChartData: () => SynopticChartData
+): () => void {
+  const controller = new AbortController();
+  const { signal } = controller;
 
-  container.querySelectorAll('.record-pill').forEach(pill => {
-    pill.addEventListener('click', () => {
-      const id = pill.getAttribute('data-id');
-      const rec = chartData.records.find(r => r.id === id);
-      if (rec) handlers.onSelectRecord(rec);
-    });
-  });
+  container.addEventListener(
+    'click',
+    event => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) return;
 
-  if (isModalOpen) {
-    container.querySelectorAll('.tag-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const tag = btn.getAttribute('data-tag');
-        if (tag) onTagChange(tag);
-      });
-    });
-
-    const intensitySlider = container.querySelector('#intensityInput') as HTMLInputElement;
-    if (intensitySlider) {
-      intensitySlider.addEventListener('input', () => {
-        onIntensityChange(parseInt(intensitySlider.value, 10));
-      });
-    }
-
-    const noteBox = container.querySelector('#noteInput') as HTMLTextAreaElement;
-    if (noteBox) {
-      noteBox.addEventListener('input', () => {
-        onNoteChange(noteBox.value);
-      });
-    }
-
-    container.querySelector('#btnCancelModal')?.addEventListener('click', onCloseModal);
-    container.querySelector('#modalBackdrop')?.addEventListener('click', e => {
-      if (e.target === container.querySelector('#modalBackdrop')) {
-        onCloseModal();
+      if (target.closest('#btnOpenLog')) {
+        handlers.onOpenLogModal();
+        return;
       }
-    });
 
-    container.querySelector('#btnSubmitModal')?.addEventListener('click', () => {
-      handlers.onSubmitLog(selectedTag, selectedIntensity, noteText);
-    });
-  }
+      if (target.closest('#btnReset')) {
+        handlers.onResetData();
+        return;
+      }
+
+      const recordPill = target.closest<HTMLElement>('.record-pill');
+      if (recordPill) {
+        const id = recordPill.dataset.id;
+        const record = getChartData().records.find(item => item.id === id);
+        if (record) handlers.onSelectRecord(record);
+        return;
+      }
+
+      if (!target.closest('.modal-backdrop')) return;
+
+      const tagButton = target.closest<HTMLElement>('.tag-btn');
+      if (tagButton?.dataset.tag) {
+        handlers.onTagChange(tagButton.dataset.tag);
+        return;
+      }
+
+      if (target.closest('#btnCancelModal')) {
+        handlers.onCloseModal();
+        return;
+      }
+
+      if (target.closest('#btnSubmitModal')) {
+        handlers.onSubmitLog();
+        return;
+      }
+
+      if (target.classList.contains('modal-backdrop')) {
+        handlers.onCloseModal();
+      }
+    },
+    { signal }
+  );
+
+  container.addEventListener(
+    'input',
+    event => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) return;
+      if (target.id === 'intensityInput') {
+        handlers.onIntensityChange(Number((target as HTMLInputElement).value));
+        return;
+      }
+
+      if (target.id === 'noteInput') {
+        handlers.onNoteChange((target as HTMLTextAreaElement).value);
+      }
+    },
+    { signal }
+  );
+
+  return () => controller.abort();
 }
