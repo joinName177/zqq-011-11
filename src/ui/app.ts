@@ -20,7 +20,7 @@ export function renderWeatherApp(
   onTagChange: (tag: string) => void,
   onIntensityChange: (val: number) => void,
   onNoteChange: (val: string) => void
-) {
+): () => void {
   const cur = chartData.currentRecord;
   const meta = TAG_METAS[cur.tag] || TAG_METAS['阴转多云'];
 
@@ -327,16 +327,20 @@ export function renderWeatherApp(
     </div>
   `;
 
-  // Attach event listeners
-  container.querySelector('#btnOpenLog')?.addEventListener('click', handlers.onOpenLogModal);
-  container.querySelector('#btnReset')?.addEventListener('click', handlers.onResetData);
+  // Attach event listeners —— 全部注册在同一个 AbortController 上，
+  // 调用方在下次渲染前执行返回的清理函数，确保旧监听器被全部移除、不随渲染次数堆积
+  const events = new AbortController();
+  const { signal } = events;
+
+  container.querySelector('#btnOpenLog')?.addEventListener('click', handlers.onOpenLogModal, { signal });
+  container.querySelector('#btnReset')?.addEventListener('click', handlers.onResetData, { signal });
 
   container.querySelectorAll('.record-pill').forEach(pill => {
     pill.addEventListener('click', () => {
       const id = pill.getAttribute('data-id');
       const rec = chartData.records.find(r => r.id === id);
       if (rec) handlers.onSelectRecord(rec);
-    });
+    }, { signal });
   });
 
   if (isModalOpen) {
@@ -344,32 +348,37 @@ export function renderWeatherApp(
       btn.addEventListener('click', () => {
         const tag = btn.getAttribute('data-tag');
         if (tag) onTagChange(tag);
-      });
+      }, { signal });
     });
 
     const intensitySlider = container.querySelector('#intensityInput') as HTMLInputElement;
     if (intensitySlider) {
       intensitySlider.addEventListener('input', () => {
         onIntensityChange(parseInt(intensitySlider.value, 10));
-      });
+      }, { signal });
     }
 
     const noteBox = container.querySelector('#noteInput') as HTMLTextAreaElement;
     if (noteBox) {
       noteBox.addEventListener('input', () => {
         onNoteChange(noteBox.value);
-      });
+      }, { signal });
     }
 
-    container.querySelector('#btnCancelModal')?.addEventListener('click', onCloseModal);
-    container.querySelector('#modalBackdrop')?.addEventListener('click', e => {
-      if (e.target === container.querySelector('#modalBackdrop')) {
+    container.querySelector('#btnCancelModal')?.addEventListener('click', onCloseModal, { signal });
+
+    const backdrop = container.querySelector('#modalBackdrop');
+    backdrop?.addEventListener('click', e => {
+      if (e.target === backdrop) {
         onCloseModal();
       }
-    });
+    }, { signal });
 
     container.querySelector('#btnSubmitModal')?.addEventListener('click', () => {
       handlers.onSubmitLog(selectedTag, selectedIntensity, noteText);
-    });
+    }, { signal });
   }
+
+  // 清理函数：中止本次渲染注册的所有事件监听
+  return () => events.abort();
 }

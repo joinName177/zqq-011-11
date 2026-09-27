@@ -119,12 +119,19 @@ export function createRecordFromTag(tag: string, intensity: number, note: string
   };
 }
 
-export function evaluateSynopticSystem(records: MoodRecord[]): SynopticChartData {
+export function evaluateSynopticSystem(records: MoodRecord[], focusDate?: string): SynopticChartData {
   const sorted = [...records].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-  const currentRecord = sorted[sorted.length - 1] || createRecordFromTag('阴转多云', 5, '默认天气');
 
-  const totalPressure = sorted.reduce((acc, r) => acc + r.pressureHpa, 0);
-  const avgPressure = Math.round(totalPressure / sorted.length);
+  // 统计窗口：聚焦日期（含）之前的观测序列。完整序列始终通过 records 暴露，
+  // 避免选择历史记录后旧窗口覆盖、隐藏更新的观测结果。
+  const windowed = focusDate ? sorted.filter(r => r.date <= focusDate) : sorted;
+  const effective = windowed.length > 0 ? windowed : sorted;
+
+  // 当前观测点在同一次计算中确定，调用方不得事后再覆盖
+  const currentRecord = effective[effective.length - 1] || createRecordFromTag('阴转多云', 5, '默认天气');
+
+  const totalPressure = effective.reduce((acc, r) => acc + r.pressureHpa, 0);
+  const avgPressure = effective.length > 0 ? Math.round(totalPressure / effective.length) : 0;
 
   // Barometric zones analysis
   let equatorial = 0; // high intensity + low/moderate pressure
@@ -132,14 +139,14 @@ export function evaluateSynopticSystem(records: MoodRecord[]): SynopticChartData
   let subPolar = 0; // low pressure sad/fog
   let polarCold = 0; // high pressure freezing/detached
 
-  sorted.forEach(r => {
+  effective.forEach(r => {
     if (r.pressureHpa >= 1020 && r.temperatureC > 15) subTropical++;
     else if (r.pressureHpa >= 1020 && r.temperatureC <= 10) polarCold++;
     else if (r.pressureHpa <= 995) subPolar++;
     else equatorial++;
   });
 
-  const total = sorted.length || 1;
+  const total = effective.length || 1;
   const zones: BarometricZone[] = [
     {
       code: 'Z-STH',
@@ -180,7 +187,7 @@ export function evaluateSynopticSystem(records: MoodRecord[]): SynopticChartData
   ];
 
   // Monsoon trend analysis
-  const recentSlice = sorted.slice(-7);
+  const recentSlice = effective.slice(-7);
   const avgIntensity = recentSlice.reduce((s, r) => s + r.intensity, 0) / (recentSlice.length || 1);
   const hasStorm = recentSlice.some(r => r.pressureHpa < 985);
 

@@ -12,7 +12,9 @@ const repo = new LocalStorageMoodAdapter();
 const metEngine = new MeteorologyEngineAdapter();
 
 let records = repo.getAll();
-let chartData: SynopticChartData = metEngine.generateSynopticChart(records);
+// 当前聚焦的观测日期；undefined 表示聚焦最新一条记录
+let focusedDate: string | undefined;
+let chartData: SynopticChartData = metEngine.generateSynopticChart(records, focusedDate);
 
 let isModalOpen = false;
 let selectedTag = '阴转多云';
@@ -31,8 +33,22 @@ rootEl.dataset.moodSummary = JSON.stringify({
   difficultBugCount: bugSurface.bugs.filter((bug) => bug.level === 'difficult').length
 });
 
-function refreshView() {
-  renderWeatherApp(
+// 重算入口唯一化：所有数据/聚焦变更都经过这里，保证重算顺序。
+// 票据守卫确保只有最后一次重算的结果生效，过期（旧）结果直接丢弃，防止异步竞态覆盖新结果。
+function recomputeChart() {
+  const ticket = metEngine.nextRequestTicket();
+  const nextChart = metEngine.generateSynopticChart(records, focusedDate);
+  if (!metEngine.isLatestTicket(ticket)) return;
+  chartData = nextChart;
+}
+
+// 上一轮渲染注册的监听器清理函数；渲染前必须先清理，防止监听器随操作不断堆积
+let disposeViewListeners: (() => void) | null = null;
+let renderScheduled = false;
+
+function commitView() {
+  disposeViewListeners?.();
+  disposeViewListeners = renderWeatherApp(
     rootEl,
     chartData,
     isModalOpen,
@@ -49,23 +65,26 @@ function refreshView() {
       },
       onResetData: () => {
         records = repo.resetToSample();
-        chartData = metEngine.generateSynopticChart(records);
+        focusedDate = undefined;
+        metEngine.invalidate();
+        recomputeChart();
         refreshView();
       },
       onSubmitLog: (tag: string, intensity: number, note: string) => {
         const todayStr = new Date().toISOString().split('T')[0];
-        const newRecord = createRecordFromTag(tag, intensity, note, todayStr);
-        repo.add(newRecord);
+        repo.add(createRecordFromTag(tag, intensity, note, todayStr));
         records = repo.getAll();
-        chartData = metEngine.generateSynopticChart(records);
+        focusedDate = undefined;
+        metEngine.invalidate();
+        recomputeChart();
         isModalOpen = false;
         refreshView();
       },
       onSelectRecord: (record: MoodRecord) => {
-        // Re-generate chart focusing on this record
-        const filtered = records.filter(r => r.date <= record.date);
-        chartData = metEngine.generateSynopticChart(filtered.length > 0 ? filtered : records);
-        chartData.currentRecord = record;
+        // 只更新聚焦点，当前观测点由引擎在同一次计算中得出，
+        // 不再用旧图表里的记录对象事后覆盖新结果
+        focusedDate = record.date;
+        recomputeChart();
         refreshView();
       }
     },
@@ -85,6 +104,17 @@ function refreshView() {
       noteText = note;
     }
   );
+}
+
+// 微任务合并渲染：同一轮事件循环里的连续状态变更只触发一次真实渲染，
+// 避免重算/重绘任务随连续操作不断堆积
+function refreshView() {
+  if (renderScheduled) return;
+  renderScheduled = true;
+  queueMicrotask(() => {
+    renderScheduled = false;
+    commitView();
+  });
 }
 
 // Initial mount
